@@ -66,6 +66,11 @@ import (
 	"google.golang.org/grpc/benchmark/latency"
 	"google.golang.org/grpc/benchmark/stats"
 	"google.golang.org/grpc/grpclog"
+
+	"go.opencensus.io/plugin/ocgrpc"
+	_ "go.opencensus.io/stats/view"
+	"go.opencensus.io/trace"
+	_ "go.opencensus.io/zpages"
 )
 
 const (
@@ -108,6 +113,11 @@ var (
 		"WAN":      latency.WAN,
 		"Longhaul": latency.Longhaul,
 	}
+
+	openCensusClientTracing bool
+	openCensusServerTracing bool
+	openCensusClientStats   bool
+	openCensusServerStats   bool
 )
 
 func unaryBenchmark(startTimer func(), stopTimer func(int32), benchFeatures stats.Features, benchtime time.Duration, s *stats.Stats) {
@@ -142,6 +152,22 @@ func makeFuncUnary(benchFeatures stats.Features) (func(int), func()) {
 	}))
 	opts = append(opts, grpc.WithInsecure())
 
+	if openCensusClientStats || openCensusClientTracing {
+		opts = append(opts, grpc.WithStatsHandler(&ocgrpc.ClientHandler{
+			NoTrace: !openCensusClientTracing,
+			NoStats: !openCensusClientStats,
+		}))
+	}
+	if openCensusServerStats || openCensusServerTracing {
+		sopts = append(sopts, grpc.StatsHandler(&ocgrpc.ServerHandler{
+			NoTrace: !openCensusServerTracing,
+			NoStats: !openCensusServerStats,
+		}))
+	}
+	if openCensusClientTracing || openCensusServerTracing {
+		trace.SetDefaultSampler(trace.AlwaysSample())
+	}
+
 	target, stopper := bm.StartServer(bm.ServerInfo{Addr: "localhost:0", Type: "protobuf", Network: nw}, sopts...)
 	conn := bm.NewClientConn(target, opts...)
 	tc := testpb.NewBenchmarkServiceClient(conn)
@@ -172,6 +198,22 @@ func makeFuncStream(benchFeatures stats.Features) (func(int), func()) {
 		return nw.TimeoutDialer(net.DialTimeout)("tcp", address, timeout)
 	}))
 	opts = append(opts, grpc.WithInsecure())
+
+	if openCensusClientStats || openCensusClientTracing {
+		opts = append(opts, grpc.WithStatsHandler(&ocgrpc.ClientHandler{
+			NoTrace: !openCensusClientTracing,
+			NoStats: !openCensusClientStats,
+		}))
+	}
+	if openCensusServerStats || openCensusServerTracing {
+		sopts = append(sopts, grpc.StatsHandler(&ocgrpc.ServerHandler{
+			NoTrace: !openCensusServerTracing,
+			NoStats: !openCensusServerStats,
+		}))
+	}
+	if openCensusClientTracing || openCensusServerTracing {
+		trace.SetDefaultSampler(trace.AlwaysSample())
+	}
 
 	target, stopper := bm.StartServer(bm.ServerInfo{Addr: "localhost:0", Type: "protobuf", Network: nw}, sopts...)
 	conn := bm.NewClientConn(target, opts...)
@@ -267,6 +309,10 @@ func init() {
 		fmt.Sprintf("Compression mode - One of: %v", strings.Join(allCompressionModes, ", ")))
 	flag.StringVar(&benchmarkResultFile, "resultFile", "", "Save the benchmark result into a binary file")
 	flag.StringVar(&networkMode, "networkMode", "", "Network mode includes LAN, WAN, Local and Longhaul")
+	flag.BoolVar(&openCensusClientStats, "opencensus-client-stats", false, "Enables OpenCensus client stats if set to true")
+	flag.BoolVar(&openCensusServerStats, "opencensus-server-stats", false, "Enables OpenCensus server stats if set to true")
+	flag.BoolVar(&openCensusClientTracing, "opencensus-client-trace", false, "Enables OpenCensus client tracing if set to true")
+	flag.BoolVar(&openCensusServerTracing, "opencensus-server-trace", false, "Enables OpenCensus server tracing if set to true")
 	flag.Parse()
 	if flag.NArg() != 0 {
 		log.Fatal("Error: unparsed arguments: ", flag.Args())
